@@ -6,27 +6,42 @@ const User = require("../models/User");
 
 const router = express.Router();
 
+// Validation schema for user input
 const validateUser = (data) => {
   const schema = Joi.object({
-    username: Joi.string().min(3).max(30).required(),
+    firstName: Joi.string().min(2).max(50).required(),
+    lastName: Joi.string().min(2).max(50).required(),
+    email: Joi.string().email().required(),
+    phone: Joi.string().length(10).pattern(/^[0-9]+$/).required(),
     password: Joi.string().min(6).max(128).required(),
   });
   return schema.validate(data);
 };
 
+// Registration route
 router.post("/register", async (req, res) => {
   const { error } = validateUser(req.body);
   if (error) return res.status(400).json({ message: error.details[0].message });
 
-  const { username, password } = req.body;
+  const { firstName, lastName, email, phone, password } = req.body;
   try {
-    const existingUser = await User.findOne({ username });
+    // Check if phone or email already exists
+    const existingUser = await User.findOne({ $or: [{ phone }, { email }] });
     if (existingUser) {
-      return res.status(400).json({ message: "Username already exists" });
+      return res.status(400).json({ message: "Phone or email already exists" });
     }
 
+    // Hash the password
     const hashedPassword = await bcrypt.hash(password, 12);
-    const newUser = new User({ username, password: hashedPassword });
+
+    // Create a new user
+    const newUser = new User({
+      firstName,
+      lastName,
+      email,
+      phone,
+      password: hashedPassword,
+    });
     await newUser.save();
 
     res.status(201).json({ message: "User registered successfully" });
@@ -35,25 +50,33 @@ router.post("/register", async (req, res) => {
   }
 });
 
+// Login route
 router.post("/login", async (req, res) => {
-  const { error } = validateUser(req.body);
-  if (error) return res.status(400).json({ message: error.details[0].message });
+  const { phone, password } = req.body;
 
-  const { username, password } = req.body;
+  if (!phone || !password) {
+    return res.status(400).json({ message: "Phone and password are required" });
+  }
+
   try {
-    const user = await User.findOne({ username });
+    // Check if the phone exists
+    const user = await User.findOne({ phone });
     if (!user) {
-      return res.status(400).json({ message: "Invalid username or password" });
+      return res.status(400).json({ message: "Invalid phone or password" });
     }
 
+    // Compare the password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      return res.status(400).json({ message: "Invalid username or password" });
+      return res.status(400).json({ message: "Invalid phone or password" });
     }
 
-    const token = jwt.sign({ id: user._id, username }, process.env.SECRET_KEY, {
-      expiresIn: process.env.TOKEN_EXPIRY,
-    });
+    // Generate JWT token
+    const token = jwt.sign(
+      { id: user._id, firstName: user.firstName, lastName: user.lastName },
+      process.env.SECRET_KEY,
+      { expiresIn: process.env.TOKEN_EXPIRY }
+    );
 
     res.status(200).json({ message: "Login successful", token });
   } catch (error) {
@@ -62,3 +85,4 @@ router.post("/login", async (req, res) => {
 });
 
 module.exports = router;
+   
